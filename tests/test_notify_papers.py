@@ -40,10 +40,40 @@ def test_duplicate_shortlist_dois_added_once():
     assert len(out) == 1
 
 
-def test_blank_doi_is_ignored():
-    shortlist = pd.DataFrame([{"doi": "", "title": "no doi"}])
+def test_paper_without_doi_is_kept_by_pmid_or_title():
+    shortlist = pd.DataFrame([{"doi": "", "pmid": "123", "title": "has pmid"},
+                              {"doi": "", "pmid": "", "title": "title only"}])
+    out = np.reconcile(_pending(), shortlist, incorporated=set(), today="2026-08-01")
+    assert list(out["title"]) == ["has pmid", "title only"]
+
+
+def test_paper_with_no_identifier_at_all_is_ignored():
+    shortlist = pd.DataFrame([{"doi": "", "pmid": "", "title": ""}])
     out = np.reconcile(_pending(), shortlist, incorporated=set(), today="2026-08-01")
     assert out.empty
+
+
+def test_other_papers_excludes_pending_and_sorts_by_score():
+    pending = _pending({"doi": "10.1/aaa", "pmid": "", "title": "A", "first_flagged": "x"})
+    found = pd.DataFrame([
+        {"doi": "10.1/aaa", "title": "A", "score": "5"},    # on the list -> excluded
+        {"doi": "10.1/low", "title": "Low", "score": "1"},
+        {"doi": "10.1/in-db", "title": "In DB", "score": "4"},
+        {"doi": "10.1/high", "title": "High", "score": "3"},
+    ])
+    out = np.other_papers(found, pending, incorporated={"10.1/in-db"})
+    assert list(out["title"]) == ["High", "Low"]
+
+
+def test_body_lists_other_papers_even_with_empty_to_check_list():
+    others = pd.DataFrame([{"doi": "", "pmid": "42", "title": "Shrimp &lt;i&gt;growth&lt;/i&gt;",
+                            "crustacean": "True", "neuropeptide": "False"}])
+    body = np.format_email_body(_pending(), others)
+    assert "No papers are waiting" in body
+    assert "1 other paper(s)" in body
+    assert "Shrimp growth" in body          # markup stripped
+    assert "PMID: 42" in body
+    assert "matched: crustacean" in body
 
 
 def test_body_empty_when_nothing_pending():

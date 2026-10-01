@@ -24,7 +24,9 @@ Examples::
 from __future__ import annotations
 
 import argparse
+import html
 import os
+import re
 import sys
 import time
 
@@ -35,6 +37,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from DataCuration.cnpdb_qc import DEFAULT_DB, load_database  # noqa: E402
 
 EPMC_BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+PAPER_COLUMNS = ["title", "authors", "journal", "year", "doi", "pmid", "abstract",
+                 "source_query"]
 NCBI_EMAIL = os.environ.get("NCBI_EMAIL", "lafields2@wisc.edu")
 NCBI_API_KEY = os.environ.get("NCBI_API_KEY")
 
@@ -71,6 +75,7 @@ NEUROPEPTIDE_TERMS = {
     "pigment dispersing", "corazonin", "bursicon", "sifamide", "leucokinin",
     "proctolin", "myosuppressin", "eclosion hormone", "ecdysis", "natalisin", "ccap",
     " chh", " mih", " gih", " vih",
+    "red pigment-concentrating", "red pigment concentrating", "rpch",
 }
 DISCOVERY_TERMS = {
     "novel", "new ", "de novo", "identif", "characteriz", "characteris", "discover",
@@ -109,11 +114,30 @@ def classify_relevance(title: str, abstract: str = "") -> dict:
             "excluded_organism": excl, "score": score, "keep": bool(crust and npep)}
 
 
-def rank_by_relevance(df: pd.DataFrame, title_col: str = "title") -> pd.DataFrame:
-    """Add relevance columns and return the frame sorted best-first, keepers on top."""
-    rel = df[title_col].fillna("").apply(classify_relevance).apply(pd.Series)
-    out = pd.concat([df.reset_index(drop=True), rel], axis=1)
+def rank_by_relevance(df: pd.DataFrame, title_col: str = "title",
+                      abstract_col: str = "abstract") -> pd.DataFrame:
+    """Add relevance columns and return the frame sorted best-first, keepers on top.
+
+    Scores title + abstract when an ``abstract_col`` column is present, so a paper
+    is not dropped just because its title omits a crustacean or neuropeptide term.
+    """
+    df = df.reset_index(drop=True)
+    titles = df[title_col].fillna("").astype(str)
+    abstracts = (df[abstract_col].fillna("").astype(str) if abstract_col in df.columns
+                 else pd.Series([""] * len(df)))
+    rel = pd.DataFrame([classify_relevance(t, a) for t, a in zip(titles, abstracts)],
+                       columns=["crustacean", "neuropeptide", "discovery",
+                                "excluded_organism", "score", "keep"])
+    out = pd.concat([df, rel], axis=1)
     return out.sort_values(["keep", "score", "year"], ascending=[False, False, False])
+
+
+def shortlist_from_ranked(ranked: pd.DataFrame) -> pd.DataFrame:
+    """Papers in cNPDB scope: crustacean AND neuropeptide terms (title or abstract).
+
+    The ``discovery`` flag only affects ranking; it is not required.
+    """
+    return ranked[ranked["keep"].astype(bool)]
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +170,31 @@ def known_dois(df: pd.DataFrame) -> set[str]:
     return out
 
 
+def normalize_title(title: str) -> str:
+    """Lower-case a title and collapse punctuation/markup to single spaces."""
+    t = html.unescape(html.unescape(str(title or ""))).lower()
+    t = re.sub(r"<[^>]+>", " ", t)
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+
+def paper_key(hit: dict) -> str:
+    """Stable identity for a paper: DOI, else ``pmid:<id>``, else ``title:<title>``.
+
+    Papers without a DOI used to be keyed by an empty value, so they were never
+    recorded as seen and came back every month.
+    """
+    nd = normalize_doi(hit.get("doi", ""))
+    if nd and nd not in ("nan", "none"):
+        return nd
+    pmid = str(hit.get("pmid", "") or "").strip()
+    if pmid and pmid.lower() not in ("nan", "none"):
+        return f"pmid:{pmid.split('.')[0]}"
+    nt = normalize_title(hit.get("title", ""))
+    return f"title:{nt}" if nt and nt not in ("nan", "none") else ""
+
+
 def load_seen_dois(path: str) -> set[str]:
-    """Read a persisted seen-DOI list (one per line; ``#`` comments ignored)."""
+    """Read a persisted seen-list (one DOI or paper key per line; ``#`` comments ignored)."""
     if not path or not os.path.exists(path):
         return set()
     out = set()
@@ -160,7 +207,7 @@ def load_seen_dois(path: str) -> set[str]:
 
 
 def append_seen_dois(path: str, dois) -> None:
-    """Append new DOIs to the persisted seen-list, keeping it sorted & unique."""
+    """Append new paper keys (see ``paper_key``) to the seen-list, sorted & unique."""
     combined = load_seen_dois(path) | {normalize_doi(d) for d in dois if normalize_doi(d)}
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# DOIs already surfaced by lit_mining discover; do not edit by hand.\n")
@@ -172,8 +219,7 @@ def filter_new_papers(hits: list[dict], seen: set[str]) -> list[dict]:
     """Return hits whose DOI is not in ``seen`` (deduped within the batch too)."""
     new, batch = [], set()
     for h in hits:
-        nd = normalize_doi(h.get("doi", ""))
-        key = nd or f"pmid:{h.get('pmid', '')}"
+        key = paper_key(h)
         if not key or key in seen or key in batch:
             continue
         batch.add(key)
@@ -206,6 +252,7 @@ def europepmc_search(query: str, page_size: int = 100, max_pages: int = 5,
                 "journal": r.get("journalTitle", ""),
                 "year": r.get("pubYear", ""),
                 "authors": r.get("authorString", ""),
+                "abstract": r.get("abstractText", ""),
                 "source_query": query,
             })
         next_cursor = data.get("nextCursorMark")
@@ -233,8 +280,66 @@ def discover_recent_papers(df: pd.DataFrame, since: str, until: str | None = Non
     hits = europepmc_search(full_query, session=session)
     seen = known_dois(df) | (extra_seen or set())
     new = filter_new_papers(hits, seen)
-    cols = ["title", "authors", "journal", "year", "doi", "pmid", "source_query"]
-    return pd.DataFrame(new, columns=cols).sort_values("year", ascending=False)
+    return pd.DataFrame(new, columns=PAPER_COLUMNS).sort_values("year", ascending=False)
+
+
+def fetch_abstract(row: dict, session: requests.Session | None = None) -> str:
+    """Look up one paper's abstract on Europe PMC by DOI, else PMID, else title."""
+    nd = normalize_doi(row.get("doi", ""))
+    pmid = str(row.get("pmid", "") or "").split(".")[0].strip()
+    if nd and nd not in ("nan", "none"):
+        query = f'DOI:"{nd}"'
+    elif pmid and pmid.lower() not in ("nan", "none"):
+        query = f"EXT_ID:{pmid} AND SRC:MED"
+    else:
+        title = re.sub(r'["<>]', " ", str(row.get("title", "") or "")).strip()
+        if not title:
+            return ""
+        query = f'TITLE:"{title}"'
+    hits = europepmc_search(query, page_size=1, max_pages=1, session=session)
+    return hits[0].get("abstract", "") if hits else ""
+
+
+def rescreen_papers(frames: list[pd.DataFrame], session: requests.Session | None = None,
+                    sleep: float = 0.3) -> pd.DataFrame:
+    """Re-score papers from earlier ``discover`` outputs using their abstracts.
+
+    Recovers papers that were found but dropped by the old title-only filter;
+    they are already on the seen-list, so ``discover`` will not return them
+    again. Duplicates across inputs are collapsed by ``paper_key``.
+    """
+    session = session or requests.Session()
+    rows, keys = [], set()
+    for f in frames:
+        for r in f.fillna("").to_dict("records"):
+            k = paper_key(r)
+            if not k or k in keys:
+                continue
+            keys.add(k)
+            rows.append(r)
+    for r in rows:
+        try:
+            r["abstract"] = fetch_abstract(r, session=session)
+        except Exception as exc:  # pragma: no cover - network defensive
+            print(f"abstract lookup failed for {r.get('doi') or r.get('title')}: {exc}")
+            r["abstract"] = ""
+        time.sleep(sleep)
+    df = pd.DataFrame(rows)
+    for c in PAPER_COLUMNS:
+        if c not in df.columns:
+            df[c] = ""
+    return df[PAPER_COLUMNS]
+
+
+def write_ranked(ranked: pd.DataFrame, out: str, shortlist: str | None) -> pd.DataFrame:
+    """Write the ranked paper list (abstracts omitted) and, optionally, the shortlist."""
+    ranked.drop(columns=["abstract"], errors="ignore").to_csv(out, index=False)
+    short = shortlist_from_ranked(ranked)
+    if shortlist:
+        short.drop(columns=["abstract"], errors="ignore").to_csv(shortlist, index=False)
+        print(f"Crustacean + neuropeptide shortlist: {len(short)} of {len(ranked)} "
+              f"-> {shortlist}")
+    return short
 
 
 def references_for_sequences(sequences, session: requests.Session | None = None,
@@ -278,7 +383,15 @@ def main(argv=None):
     d.add_argument("--update-seen", action="store_true",
                    help="append this run's DOIs to the --seen file")
     d.add_argument("--shortlist", default=None,
-                   help="also write a crustacea-only, discovery-ranked shortlist here")
+                   help="also write the crustacean + neuropeptide shortlist here")
+
+    s = sub.add_parser("rescreen",
+                       help="re-score papers from earlier discover outputs using abstracts")
+    s.add_argument("--inputs", nargs="+", required=True,
+                   help="earlier new_papers_<date>.csv files")
+    s.add_argument("--db", default=DEFAULT_DB)
+    s.add_argument("--out", required=True, help="ranked list of every re-screened paper")
+    s.add_argument("--shortlist", default=None, help="crustacean + neuropeptide subset")
 
     r = sub.add_parser("references", help="collect references for existing peptides")
     r.add_argument("--db", default=DEFAULT_DB)
@@ -291,18 +404,17 @@ def main(argv=None):
     if args.mode == "discover":
         extra_seen = load_seen_dois(args.seen) if args.seen else set()
         out = discover_recent_papers(df, since=args.since, until=args.until, extra_seen=extra_seen)
-        out.to_csv(args.out, index=False)
         print(f"Found {len(out)} candidate new papers since {args.since} "
               f"(excluding {len(extra_seen)} already-seen) -> {args.out}")
-        if args.shortlist:
-            ranked = rank_by_relevance(out)
-            short = ranked[ranked["keep"] & ranked["discovery"]]
-            short.to_csv(args.shortlist, index=False)
-            print(f"Crustacea-only discovery shortlist: {len(short)} of {len(out)} "
-                  f"-> {args.shortlist}")
+        write_ranked(rank_by_relevance(out), args.out, args.shortlist)
         if args.seen and args.update_seen:
-            append_seen_dois(args.seen, out["doi"].tolist())
+            append_seen_dois(args.seen, [paper_key(r) for r in out.to_dict("records")])
             print(f"Updated seen-list -> {args.seen}")
+    elif args.mode == "rescreen":
+        frames = [pd.read_csv(p, dtype=str) for p in args.inputs]
+        out = rescreen_papers(frames)
+        print(f"Re-screened {len(out)} papers from {len(args.inputs)} file(s) -> {args.out}")
+        write_ranked(rank_by_relevance(out), args.out, args.shortlist)
     else:
         seqs = df["Sequence"].dropna().astype(str).tolist()
         if args.limit:

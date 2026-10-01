@@ -97,3 +97,47 @@ def test_rank_by_relevance_sorts_keepers_first():
     assert ranked.iloc[0]["title"] == "Novel neuropeptides in the blue crab"
     assert bool(ranked.iloc[0]["keep"]) is True
     assert int(ranked["keep"].sum()) == 1
+
+
+def test_rank_uses_abstract_when_title_lacks_terms():
+    df = pd.DataFrame({
+        "title": ["Feeding behaviour study"],
+        "abstract": ["We profiled neuropeptides in the Jonah crab."],
+        "year": [2026],
+    })
+    ranked = lm.rank_by_relevance(df)
+    assert bool(ranked.iloc[0]["keep"]) is True
+
+
+def test_shortlist_does_not_require_a_discovery_term():
+    df = pd.DataFrame({"title": ["Neuropeptide F alters feeding genes in a prawn"],
+                       "year": [2026]})
+    ranked = lm.rank_by_relevance(df)
+    assert not bool(ranked.iloc[0]["discovery"])
+    assert len(lm.shortlist_from_ranked(ranked)) == 1
+
+
+def test_rpch_counts_as_neuropeptide():
+    r = lm.classify_relevance("Red pigment-concentrating hormone knockdown in Litopenaeus vannamei")
+    assert r["neuropeptide"] and r["keep"]
+
+
+def test_paper_key_falls_back_to_pmid_then_title():
+    assert lm.paper_key({"doi": "10.1/X", "pmid": "5"}) == "10.1/x"
+    assert lm.paper_key({"doi": "", "pmid": "5.0"}) == "pmid:5"
+    assert lm.paper_key({"doi": "nan", "pmid": "nan",
+                         "title": "Crab &lt;i&gt;Hemolymph&lt;/i&gt;!"}) == "title:crab hemolymph"
+    assert lm.paper_key({"doi": "", "pmid": "", "title": ""}) == ""
+
+
+def test_paper_without_doi_or_pmid_is_seen_by_title():
+    hit = {"doi": "", "pmid": "", "title": "Approach for hemolymph collection"}
+    key = lm.paper_key(hit)
+    assert lm.filter_new_papers([hit], seen=set()) == [hit]
+    assert lm.filter_new_papers([hit], seen={key}) == []
+
+
+def test_seen_list_stores_non_doi_keys(tmp_path):
+    path = str(tmp_path / "seen.txt")
+    lm.append_seen_dois(path, ["10.1/a", "pmid:7", "title:crab hemolymph"])
+    assert lm.load_seen_dois(path) == {"10.1/a", "pmid:7", "title:crab hemolymph"}
