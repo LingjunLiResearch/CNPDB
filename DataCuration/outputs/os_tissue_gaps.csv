@@ -58,6 +58,7 @@ cNPDB ID,Sequence,Family,cNPDB_OS,missing_OS,cNPDB_Tissue,missing_Tissue,lit_spe
 459,NSELINSILGLPKVMNDA,PDH,Cbo;Cmag;Pint;Spar,Cmae,Br;SG,,Cmae,,3,10.3389/fnins.2017.00752
 606,DGRTPALRLRF,RFamide,Lva,Spar,VNC,,Spar,,6,10.3390/ijms21072297
 611,QFDEYGHMRF,RFamide,Mros,,SG,CNS;ES;OVR,Mros,CNS;ES;OVR,1,10.1371/journal.pone.0123848
+639,GYRKPPFNGSIF,SIFamide,Cbo;Cmae;Csap;Pint,,Br;CoG;SG;STG;VNC,CNS,Pint,Br;CNS,5,10.1002/cne.70201;10.1007/s00441-025-03978-y;10.1021/acs.jproteome.5b00627;10.1186/1742-9994-7-25
 644,APSGFLGM,Tachykinin,Csap,Cbo;Cmae;HoA;Lva;Oce;Pint,Br,SG;STG;hemolymph,Cbo;Cmae;Csap;HoA;Lva;Oce;Pint,Br;SG;STG;hemolymph,15,10.1002/rcm.7037;10.1016/j.peptides.2009.10.007;10.1016/j.ygcen.2008.01.009;10.1016/j.ygcen.2009.01.015;10.1016/j.ygcen.2012.12.008
 646,APSGFLGMR,Tachykinin,Cbo;Csap;HoA;Lva;Pint,,Br;CNS;OG;VNC;hemolymph,STG,Cbo;HoA;Pint,Br;STG,7,10.1002/cne.22654;10.1021/acs.jproteome.5b00627;10.1021/cn200107v;10.1242/jeb.200.17.2279
 647,TPSGFLGMR,Tachykinin,Cbo;Cmae;Csap,HoA,Br;CoG;PO;SG;VNC,STG,HoA,STG,2,10.1021/cn200107v
@@ -77,7 +78,7 @@ cNPDB ID,Sequence,Family,cNPDB_OS,missing_OS,cNPDB_Tissue,missing_Tissue,lit_spe
 972,SPSMDLSGNQD,Leucokinin,HoA,,Br;CoG,ES,HoA,ES,1,10.1016/j.ygcen.2016.11.001
 973,SSGDELDDHFLD,Leucokinin,HoA,,Br;TG,ES,HoA,ES,1,10.1016/j.ygcen.2016.11.001
 984,DFDEIDR,Orcokinin,Oce,Csap,SG,,Csap;Oce,SG,3,10.1016/j.ygcen.2012.12.008;10.1021/pr200391g
-993,NFDEIDR,Orcokinin,Oce,Csap;Lva;Pint,PO;SG,Br,Csap;Lva;Oce;Pint,Br;SG,13,10.1007/s00441-020-03199-5;10.1016/j.peptides.2009.10.007;10.1016/j.ygcen.2012.12.008;10.1021/acs.jproteome.5b00627;10.1021/pr200391g
+993,NFDEIDR,Orcokinin,Oce,Csap;Lva;Pint,PO;SG,Br;CNS,Csap;Lva;Oce;Pint,Br;CNS;SG,14,10.1002/cne.70201;10.1007/s00441-020-03199-5;10.1016/j.peptides.2009.10.007;10.1016/j.ygcen.2012.12.008;10.1021/acs.jproteome.5b00627
 994,NFDEIDRA,Orcokinin,Lva,Pint,Br;VNC,,Lva;Pint,Br,2,10.1016/j.peptides.2009.10.007;10.1021/acs.jproteome.5b00627
 995,NFDEIDRAGFA,Orcokinin,Pint,Lva,Br,,Lva;Pint,Br,2,10.1016/j.peptides.2009.10.007;10.1021/acs.jproteome.5b00627
 1004,NFDEIDRS,Orcokinin,Oce,Mros;Spar;Sver,Br,CNS;ES;OVR,Mros;Oce;Spar;Sver,Br;CNS;ES;OVR,5,10.1002/cne.22517;10.1016/j.ygcen.2012.12.008;10.1038/srep17055;10.1371/journal.pone.0097323;10.1371/journal.pone.0123848
