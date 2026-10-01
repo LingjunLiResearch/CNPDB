@@ -2,7 +2,8 @@ name: literature-mining
 
 # Monthly, network-bound curation refresh:
 #   1. scan Europe PMC for crustacean-neuropeptide papers not yet seen/cited
-#   2. rank them crustacea-only and emit a discovery shortlist to screen
+#   2. score title + abstract; shortlist crustacean + neuropeptide papers, and
+#      name every other paper found in the email below the shortlist
 #   3. re-run the per-peptide OS/tissue completeness sweep against the database
 # All results are committed to DataCuration/outputs/.
 #
@@ -16,6 +17,10 @@ on:
         description: "ISO start date (YYYY-MM-DD)"
         required: true
         default: "2025-01-01"
+      rescreen:
+        description: "One-off recovery: space-separated earlier DataCuration/outputs/new_papers_<date>.csv files to re-score using abstracts. Leave blank for a normal run."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -48,11 +53,24 @@ jobs:
             --out "DataCuration/outputs/new_papers_${STAMP}.csv" \
             --shortlist "DataCuration/outputs/shortlist_${STAMP}.csv"
 
+      - name: Re-screen earlier papers (manual runs with rescreen set)
+        if: ${{ github.event.inputs.rescreen }}
+        env:
+          RESCREEN: ${{ github.event.inputs.rescreen }}
+        run: |
+          python -m DataCuration.lit_mining rescreen \
+            --inputs $RESCREEN \
+            --out "DataCuration/outputs/rescreen_${STAMP}.csv" \
+            --shortlist "DataCuration/outputs/rescreen_shortlist_${STAMP}.csv"
+
       - name: Update the papers-to-check reminder + build email
         id: papers
         run: |
           python -m DataCuration.notify_papers reconcile \
             --shortlist "DataCuration/outputs/shortlist_${STAMP}.csv" \
+                        "DataCuration/outputs/rescreen_shortlist_${STAMP}.csv" \
+            --found "DataCuration/outputs/new_papers_${STAMP}.csv" \
+                    "DataCuration/outputs/rescreen_${STAMP}.csv" \
             --list DataCuration/outputs/papers_to_check.csv \
             --date "${STAMP}" \
             --body-out email_body.txt
